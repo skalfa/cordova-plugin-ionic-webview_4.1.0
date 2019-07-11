@@ -14,12 +14,20 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+
+import com.microsoft.cordova.CodePushPackageManager;
+import com.microsoft.cordova.CodePushPreferences;
+
 import org.apache.cordova.ConfigXmlParser;
 import org.apache.cordova.CordovaInterface;
 import org.apache.cordova.CordovaPreferences;
 import org.apache.cordova.CordovaResourceApi;
 import org.apache.cordova.CordovaWebView;
 import org.apache.cordova.CordovaWebViewEngine;
+
+import java.io.File;
+import java.net.MalformedURLException;
+
 import org.apache.cordova.NativeToJsMessageQueue;
 import org.apache.cordova.PluginManager;
 import org.apache.cordova.engine.SystemWebViewClient;
@@ -53,6 +61,14 @@ public class IonicWebViewEngine extends SystemWebViewEngine {
   }
 
   @Override
+    public void loadUrl(String url, boolean clearNavigationStack) {
+      if (!url.startsWith("file:///android_asset/")) {
+          url = url.replace("file:", CDV_LOCAL_SERVER + "/_file_");
+      }
+      super.loadUrl(url, clearNavigationStack);
+    }
+
+  @Override
   public void init(CordovaWebView parentWebView, CordovaInterface cordova, final CordovaWebViewEngine.Client client,
                    CordovaResourceApi resourceApi, PluginManager pluginManager,
                    NativeToJsMessageQueue nativeToJsMessageQueue) {
@@ -66,7 +82,7 @@ public class IonicWebViewEngine extends SystemWebViewEngine {
     localServer = new WebViewLocalServer(cordova.getActivity(), hostname, true, parser, scheme);
     localServer.hostAssets("www");
 
-    webView.setWebViewClient(new ServerClient(this, parser));
+    webView.setWebViewClient(new ServerClient(this, parser, cordova));
 
     super.init(parentWebView, cordova, client, resourceApi, pluginManager, nativeToJsMessageQueue);
     if (android.os.Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -113,7 +129,7 @@ public class IonicWebViewEngine extends SystemWebViewEngine {
   private class ServerClient extends SystemWebViewClient {
     private ConfigXmlParser parser;
 
-    public ServerClient(SystemWebViewEngine parentEngine, ConfigXmlParser parser) {
+    public ServerClient(SystemWebViewEngine parentEngine, ConfigXmlParser parser, CordovaInterface cordova) {
       super(parentEngine);
       this.parser = parser;
     }
@@ -136,6 +152,21 @@ public class IonicWebViewEngine extends SystemWebViewEngine {
       String launchUrl = parser.getLaunchUrl();
       if (!launchUrl.contains(WebViewLocalServer.httpsScheme) && !launchUrl.contains(WebViewLocalServer.httpScheme) && url.equals(launchUrl)) {
         view.stopLoading();
+
+        try {
+          CodePushPreferences codePushPreferences = new CodePushPreferences(cordova.getActivity());
+          CodePushPackageManager codePushPackageManager = new CodePushPackageManager(cordova.getActivity(), codePushPreferences);
+          String packageLocation = codePushPackageManager.getCurrentPackageMetadata().localPath;
+          File startPage = new File(this.cordova.getActivity().getFilesDir() + packageLocation, "www/index.html");
+          String finalUrl = startPage.toURI().toURL().toString();
+           this.parentEngine.loadUrl(finalUrl, false);
+        } catch (MalformedURLException e) {
+          e.printStackTrace();
+        } catch (Exception e) {
+          e.printStackTrace();
+          webView.loadUrl(CDV_LOCAL_SERVER);
+        }
+
         // When using a custom scheme the app won't load if server start url doesn't end in /
         String startUrl = CDV_LOCAL_SERVER;
         if (!CDV_LOCAL_SERVER.startsWith(WebViewLocalServer.httpsScheme) && !CDV_LOCAL_SERVER.startsWith(WebViewLocalServer.httpScheme)) {
